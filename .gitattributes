@@ -1,0 +1,4 @@
+# keep LF in the repository (CI runs on Linux); GDS and other layout data are binary
+* text=auto eol=lf
+*.gds binary
+*.bat text eol=crlf

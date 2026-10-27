@@ -1,0 +1,60 @@
+# Tiny Tapeout project information
+project:
+  title:        "Pinwheel protocol emulator"      # Project title
+  author:       "Sashwath-s"                    # GitHub handle; put your name / team here
+  discord:      ""                                # Your discord username (optional)
+  description:  "4-thread barrel processor with cycle-exact waveform lanes for software-defined UART/SPI/I2C and more"
+  language:     "Verilog"
+  clock_hz:     50000000                          # 50 MHz nominal
+
+  # Jane Street protocol emulator ASIC competition allocation
+  tiles: "6x4"
+
+  # Must start with "tt_um_" and be unique (GitHub user Sashwath-s)
+  top_module:  "tt_um_sashwath_s_pinwheel"
+
+  # Source files in ./src, one per line. Keep PROJECT_SOURCES in test/Makefile in sync.
+  source_files:
+    - "tt_um_pinwheel.v"
+    - "pw_top.v"
+    - "pw_core.v"
+    - "pw_lane.v"
+    - "pw_host_spi.v"
+    - "pw_mem.v"
+    - "pw_fifo.v"
+    - "RM_IHPSG13_1P_512x16_c2_bm_bist.v"   # SRAM macro black box (MACROS in src/config.json)
+
+# The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
+pinout:
+  # Inputs
+  ui[0]: "P16 in (demo: UART RX)"
+  ui[1]: "P17 in (demo: SPI MISO)"
+  ui[2]: "P18 in"
+  ui[3]: "P19 in"
+  ui[4]: "HOST_CS_N"
+  ui[5]: "HOST_SCK"
+  ui[6]: "HOST_MOSI"
+  ui[7]: "P23 in"
+
+  # Outputs
+  uo[0]: "P8 out (demo: UART TX)"
+  uo[1]: "P9 out (demo: SPI SCK)"
+  uo[2]: "P10 out (demo: SPI MOSI)"
+  uo[3]: "P11 out (demo: SPI CS)"
+  uo[4]: "P12 out"
+  uo[5]: "P13 out"
+  uo[6]: "P14 out"
+  uo[7]: "HOST_MISO"
+
+  # Bidirectional pins
+  uio[0]: "P0 io (demo: I2C SCL)"
+  uio[1]: "P1 io (demo: I2C SDA)"
+  uio[2]: "P2 io"
+  uio[3]: "P3 io"
+  uio[4]: "P4 io"
+  uio[5]: "P5 io"
+  uio[6]: "P6 io"
+  uio[7]: "P7 io"
+
+# Do not change!
+yaml_version: 6

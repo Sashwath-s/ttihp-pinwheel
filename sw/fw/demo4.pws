@@ -1,0 +1,170 @@
+; demo4.pws -- four protocols on four hardware threads, all running concurrently.
+;   T0: UART TX   host mailbox -> lane 0 -> UO0          (1 Mbaud @ 50 MHz)
+;   T1: UART RX   UI0 -> lane 1 (AUTO, start-bit trigger) -> host mailbox
+;   T2: SPI master mode 0, lane 2: SCK=UO1 MOSI=UO2 MISO=UI1, CS=UO3 (GPIO)
+;   T3: I2C master, lane 3: SCL=UIO0 SDA=UIO1 (open drain, clock stretching)
+; Thread k starts at address k (reset PC), so 0..3 is a jump table.
+
+        .org 0
+        jmp  t0_main
+        jmp  t1_main
+        jmp  t2_main
+        jmp  t3_main
+
+UART_DIV = 24                   ; 2 phases x 25 cycles = 50 cycles/bit = 1 Mbaud
+SPI_DIV  = 1                    ; 4 phases x 2 cycles  = 8 cycles/bit  = 6.25 MHz SCK
+I2C_DIV  = 30                   ; 4 phases x 31 cycles = 124 cycles/bit ~ 400 kHz
+
+; --------------------------------------------------------------------------- T0 UART TX
+t0_main:
+        li   r1, CFG0(nbits=10, nph=2)              ; LSB first, 10-bit frames
+        out  L0_CFG0, r1
+        li   r1, UART_DIV
+        out  L0_DIV, r1
+        li16 r1, TPL(PH(D_BIT), PH())
+        out  L0_TPL01, r1
+        li   r1, PINS0(dout=UO0)
+        out  L0_PINS0, r1
+        li   r1, CFG1(en=1, dout=1, dout_idle=1)
+        out  L0_CFG1, r1
+        li16 r2, 0x200                              ; stop bit
+t0_loop:
+        in   r1, MBOX                               ; byte from host (blocks)
+        andi r1, 0xFF
+        shli r1, r1, 1                              ; start bit = 0
+        or   r1, r1, r2
+        out  LDATA0, r1                             ; queue the frame (blocks if lane FIFO full)
+        jmp  t0_loop
+
+; --------------------------------------------------------------------------- T1 UART RX
+t1_main:
+        li16 r1, CFG0(nbits=10, nph=2, rxen=1, auto=1, trig=FALL)
+        out  L1_CFG0, r1
+        li   r1, UART_DIV
+        out  L1_DIV, r1
+        li16 r1, TPL(PH(), PH(sample=1))            ; sample mid-bit
+        out  L1_TPL01, r1
+        li16 r1, PINS0(din=UI0)
+        out  L1_PINS0, r1
+        li   r1, PINS1(trig=UI0)
+        out  L1_PINS1, r1
+        li   r1, CFG1(en=1)
+        out  L1_CFG1, r1
+t1_loop:
+        in   r1, LDATA1                             ; {stop, data[7:0], start}
+        shri r2, r1, 1
+        andi r2, 0xFF
+        bbs  r1, 9, t1_ok                           ; stop bit must be 1
+        li16 r3, 0x100                              ; framing error flag
+        or   r2, r2, r3
+t1_ok:
+        out  MBOX, r2
+        jmp  t1_loop
+
+; --------------------------------------------------------------------------- T2 SPI master
+; host sends n, then n bytes; thread returns the n received bytes
+t2_main:
+        li16 r1, CFG0(nbits=8, msb=1, nph=4, rxen=1)
+        out  L2_CFG0, r1
+        li   r1, SPI_DIV
+        out  L2_DIV, r1
+        li16 r1, TPL(PH(D_BIT), PH(clk=C_HI))       ; data out, SCK rises
+        out  L2_TPL01, r1
+        li16 r1, TPL(PH(sample=1), PH(clk=C_LO))    ; sample, SCK falls
+        out  L2_TPL23, r1
+        li16 r1, PINS0(dout=UO2, clk=UO1, din=UI1)
+        out  L2_PINS0, r1
+        li   r1, CFG1(en=1, dout=1, clk=1)
+        out  L2_CFG1, r1
+        pset uo, 0x08                               ; CS (UO3) idle high
+t2_loop:
+        in   r1, MBOX                               ; n >= 1
+        pclr uo, 0x08                               ; assert CS
+        in   r2, MBOX
+        out  LDATA2, r2                             ; first byte
+        addi r1, r1, -1
+t2_next:
+        bz   r1, t2_drain
+        in   r2, MBOX
+        out  LDATA2, r2                             ; queue next byte: chains with no gap
+        in   r2, LDATA2                             ; response to the previous byte
+        out  MBOX, r2
+        addi r1, r1, -1
+        b    t2_next
+t2_drain:
+        in   r2, LDATA2
+        out  MBOX, r2
+        in   r2, LCTRL2                             ; wait until the lane is idle
+        pset uo, 0x08                               ; release CS
+        b    t2_loop
+
+; --------------------------------------------------------------------------- T3 I2C master
+; host command word: 0x01xx START/RESTART -> 0 | 0x02bb WRITE -> ack (0 = ACK)
+;                    0x03aa READ (aa=1: NACK) -> byte | 0x04xx STOP -> 0
+t3_main:
+        li   r1, 0x03
+        out  GPOD, r1                               ; UIO0/UIO1 open drain
+        li16 r1, CFG0(nbits=9, msb=1, nph=4, rxen=1)
+        out  L3_CFG0, r1
+        li   r1, I2C_DIV
+        out  L3_DIV, r1
+        li16 r1, TPL(PH(D_BIT), PH(clk=C_HI, exit=X_HIGH))   ; SDA, release SCL (+stretch)
+        out  L3_TPL01, r1
+        li16 r1, TPL(PH(sample=1), PH(clk=C_LO))             ; sample mid-high, SCL low
+        out  L3_TPL23, r1
+        li16 r1, PINS0(dout=UIO1, clk=UIO0, din=UIO1)
+        out  L3_PINS0, r1
+        li   r1, PINS1(trig=UIO0, clkin=UIO0)
+        out  L3_PINS1, r1
+        li   r1, CFG1(en=1, dout=1, clk=1, dout_idle=1, clk_idle=1)
+        out  L3_CFG1, r1
+t3_loop:
+        in   r1, MBOX
+        shri r2, r1, 8                              ; command
+        andi r1, 0xFF                               ; argument
+        li   r3, 1
+        beq  r2, r3, t3_start
+        li   r3, 2
+        beq  r2, r3, t3_write
+        li   r3, 3
+        beq  r2, r3, t3_read
+        li   r3, 4
+        beq  r2, r3, t3_stop
+        li   r2, 0xEE                               ; unknown command
+        out  MBOX, r2
+        jmp  t3_loop
+t3_start:                                           ; same sequence for START and repeated START
+        outi LCTRL3, DRIVE(dout=1, clk=0, hold=1)   ; release SDA while SCL low
+        outi LCTRL3, DRIVE(dout=1, clk=1)           ; release SCL
+        outi LCTRL3, WAITPIN(HIGH, 1)               ; until SCL really high (stretching)
+        outi LCTRL3, WAIT(1)                        ; tSU;STA
+        outi LCTRL3, DRIVE(dout=0, clk=1, hold=1)   ; SDA falls while SCL high = START
+        outi LCTRL3, DRIVE(dout=0, clk=0, hold=1)   ; SCL low
+        jmp  t3_done
+t3_write:
+        shli r1, r1, 1
+        addi r1, r1, 1                              ; {byte, 1}: release SDA for ACK
+        out  LDATA3, r1
+        in   r2, LDATA3                             ; {bus byte, ack}
+        andi r2, 1
+        out  MBOX, r2
+        jmp  t3_loop
+t3_read:
+        li16 r2, 0x1FE
+        or   r2, r2, r1                             ; {0xFF (released), ack/nack}
+        out  LDATA3, r2
+        in   r2, LDATA3
+        shri r2, r2, 1                              ; data byte
+        out  MBOX, r2
+        jmp  t3_loop
+t3_stop:
+        outi LCTRL3, DRIVE(dout=0, clk=0, hold=1)   ; SDA low while SCL low
+        outi LCTRL3, DRIVE(dout=0, clk=1)           ; release SCL
+        outi LCTRL3, WAITPIN(HIGH, 1)
+        outi LCTRL3, WAIT(1)                        ; tSU;STO
+        outi LCTRL3, DRIVE(dout=1, clk=1, hold=2)   ; SDA rises while SCL high = STOP
+t3_done:
+        in   r2, LCTRL3                             ; wait until the lane has drained
+        li   r2, 0
+        out  MBOX, r2
+        jmp  t3_loop
