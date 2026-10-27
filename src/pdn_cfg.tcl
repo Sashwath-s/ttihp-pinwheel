@@ -79,19 +79,10 @@ if { $::env(PDN_ENABLE_RAILS) == 1 } {
         -layers "$::env(PDN_RAIL_LAYER) $::env(PDN_VERTICAL_LAYER)"
 }
 
-# Macro grid: only reserves the halo so the stripes and rails stay clear of the SRAM.
-# The Metal4-TopMetal1 connection is LibreLane's default; at block level there is no
-# TopMetal1, so it creates nothing here (Tiny Tapeout's top level provides TopMetal1).
-define_pdn_grid \
-    -macro \
-    -default \
-    -name macro \
-    -starts_with POWER \
-    -halo "$::env(PDN_HORIZONTAL_HALO) $::env(PDN_VERTICAL_HALO)"
-
-add_pdn_connect \
-    -grid macro \
-    -layers "$::env(PDN_VERTICAL_LAYER) $::env(PDN_HORIZONTAL_LAYER)"
+# No macro grid: on CMOS5L the stripe layer is the macro's pin layer (Metal4), so a
+# macro grid can never create a via, and pdngen rejects the empty grid
+# (PDN-0232/PDN-0233, first GDS run). The stripes are kept off the SRAM by
+# PDN_OBSTRUCTIONS in src/config.json (macro + 10 um halo on Metal4) instead.
 
 # Export the SRAM's Metal4 power straps as VPWR/VGND block pins (see header).
 proc pw_export_macro_power_pins {} {

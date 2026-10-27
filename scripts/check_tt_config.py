@@ -79,6 +79,13 @@ def main():
     check(CORE[0] <= x1 and CORE[1] <= y1 and x2 <= CORE[2] and y2 <= CORE[3],
           f"macro+halo ({x1:.2f},{y1:.2f})-({x2:.2f},{y2:.2f}) inside core {CORE}")
     check(x1 > TT_PINS_X_MAX, f"macro+halo clear of the TT pins (x < {TT_PINS_X_MAX} at the top edge)")
+    obs = [o.split() for o in cfg.get("PDN_OBSTRUCTIONS", [])]
+    covered = any(o[0] == "Metal4" and float(o[1]) <= x1 + 1e-6 and float(o[2]) <= y1 + 1e-6
+                  and float(o[3]) >= x2 - 1e-6 and float(o[4]) >= y2 - 1e-6 for o in obs)
+    check(covered, "PDN_OBSTRUCTIONS keeps Metal4 stripes off the macro + halo")
+    check("define_pdn_grid -macro" not in re.sub(r"#.*", "", open(resolve(cfg["PDN_CFG"])).read())
+          and "-macro" not in re.sub(r"#.*", "", open(resolve(cfg["PDN_CFG"])).read()),
+          "pdn_cfg.tcl defines no macro grid (an empty one is fatal, PDN-0233)")
     check(abs((x - CORE[0]) / 0.48 - round((x - CORE[0]) / 0.48)) < 1e-6
           and abs((y - CORE[1]) / 3.78 - round((y - CORE[1]) / 3.78)) < 1e-6,
           "location on the site/row grid")

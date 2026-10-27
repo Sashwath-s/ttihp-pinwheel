@@ -84,6 +84,10 @@
   "//": "exported as VPWR/VGND block pins for the TT top-level TopMetal1 grid (see pdn_cfg.tcl).",
   "PDN_CFG": "dir::pdn_cfg.tcl",
 
+  "//": "Keep the core Metal4 stripes off the SRAM: macro (300, 502.74)-(536.8, 694.08) + 10 um halo.",
+  "//": "Applied only while the PDN is generated (LibreLane removes it afterwards).",
+  "PDN_OBSTRUCTIONS": ["Metal4 290.00 492.74 546.80 704.08"],
+
   "//": "SRAM GDS has no PR boundary layer; read full GDS instead of blackbox",
   "MAGIC_MACRO_STD_CELL_SOURCE": "PDK",
 
