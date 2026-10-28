@@ -318,7 +318,7 @@ Pattern from [urish/ttihp-sram-test](https://github.com/urish/ttihp-sram-test), 
 - **Defines:** `VERILOG_DEFINES: ["PW_MEM_IHP_SRAM"]`.
 - **Macro files:** `MACROS` with the GDS, LEF, three liberty corners (keyed by PVT: `*_typ_1p20V_25C`, `*_slow_1p08V_125C`, `*_fast_1p32V_m40C`) and the CDL. They're vendored in `macro/RM_IHPSG13_1P_512x16_c2_bm_bist/` from IHP-Open-PDK `2bbec755`, the revision `tt-gds-action@ihp-cmos5l` installs, byte-identical to `dev`.
 - **Netlist stub:** `src/RM_IHPSG13_1P_512x16_c2_bm_bist.v` (`(* blackbox *)`), also listed in `info.yaml`.
-- **Placement:** instance `u_pw.u_mem.u_sram` (the flattened Yosys name) at (300.00, 502.74) µm, R0. That's the top band right of the TT pins (x < 192). The bottom-edge Metal2 pins face the logic, and the position is on the site/row grid.
+- **Placement:** instance `u_pw.u_mem.u_sram` (the flattened Yosys name) at (307.355, 260.82) µm, R0. That x is what lines the PDN stripes up with the macro's straps (below), and it leaves standard-cell rows both above and below the SRAM. The bottom-edge Metal2 pins face the logic, and the macro is well clear of the TT pins (x < 192 on the top edge).
 - **Power connections:** `PDN_MACRO_CONNECTIONS` ties `VDD!` and `VDDARRAY!` to `VPWR` and `VSS!` to `VGND`.
 - **Sign-off settings, copied from the reference:** `MAGIC_MACRO_STD_CELL_SOURCE: PDK`, `ERROR_ON_MAGIC_DRC: false` (so check the Magic DRC report by hand), `MAGIC_EXT_ABSTRACT_CELLS: ["RM_IHPSG13_.*"]`.
 - **Gate-level test:** `test/Makefile` simulates the vendored model, and `test/tb.v` now matches the CMOS5L template (no power ports).
@@ -329,25 +329,34 @@ Pattern from [urish/ttihp-sram-test](https://github.com/urish/ttihp-sram-test), 
 - `VDD!`: 4 full-height straps plus 16 in the bottom 38.8 µm.
 - `VDDARRAY!`: 16 from y = 45.5 µm to the top.
 
-The SG13G2 reference strapped Metal4 to TopMetal1 inside the block, which CMOS5L forbids. `src/pdn_cfg.tcl` therefore **exports every macro Metal4 power strap as a VPWR/VGND block pin**, alongside the standard-cell Metal4 stripes. TT's TopMetal1 grid then lands on them wherever it crosses, the same way it lands on the stripes. The script checks the instance is R0 and logs how many straps it exported.
+The SG13G2 reference strapped Metal4 up to TopMetal1 inside the block, which CMOS5L forbids. Two attempts failed on GitHub before the current scheme:
 
-This needs confirmation that TT's top-level grid connects to every Metal4 power pin of the block, not only to full-height stripes. If it doesn't, the alternatives are:
+1. **Run 1: a macro grid.** The stripe layer *is* the macro's pin layer, so a macro grid can never create a via, and pdngen rejects the empty grid (`PDN-0232`/`PDN-0233`).
+2. **Run 2: exporting the macro straps as block pins.** Legal, but the SRAM is then connected only through TT's top level. OpenROAD's power analysis rejects the islands (`PSM-0069`, "unconnected shape on net VPWR"), and LVS would likely do the same.
 
-1. A local Metal3/Metal4 bus just above the macro's top edge, where all three supplies terminate, tied into the core stripes.
-2. A 256×16 latch RAM. About 150k µm²; with the real die it fits at ~78% of the budget with no macro at all.
+**Current scheme: ordinary PDN stripes run straight over same-net straps.** In run 2, LibreLane put Metal4 stripe centres at VPWR = 2.88 + 10 + 50k µm and VGND = VPWR + width + spacing. The stripes are 2.1 µm wide and the straps 2.81 µm, so a stripe centred on a strap fits inside it with ±0.355 µm to spare. With the macro at x = 307.355 and `FP_PDN_VSPACING` = 3.05:
 
-`scripts/check_tt_config.py` runs the static checks: JSON, every path, stub ports vs LEF pins, PDN pin names, placement inside the core and clear of the TT pins, and a TT-like Yosys read that keeps the exact instance name. All 20 pass.
+| Stripe (centre, µm) | Lands on (macro x) | Covers |
+|---|---|---|
+| VPWR 412.88 | full-height `VDD!` strap (104.12–106.93) | whole macro height |
+| VGND 418.03 | full-height `VSS!` strap (109.27–112.08) | whole macro height |
+| VPWR 312.88 | `VDDARRAY!` strap (4.26–7.07) | from y = 60 µm (macro) up to the top edge |
+
+Four `PDN_OBSTRUCTIONS` rectangles cut every other stripe over the macro plus a 10 µm halo, and stop the `VDDARRAY!` stripe 14 µm inside its strap. That keeps it clear of the gap above the short `VDD!` straps. The three stripes continue into the core, so pdngen connects them to the standard-cell rails above and below the SRAM like any other stripe.
+
+`scripts/check_tt_config.py` simulates this geometry against the macro LEF. It checks that every stripe piece over the SRAM lies inside a same-net strap and clear of the macro's Metal4 obstruction shapes, and that `VDD!`, `VDDARRAY!` and `VSS!` are each fed. All checks pass, and shifting the macro by 0.3 µm makes them fail, so the margin is real. The scheme depends on LibreLane's stripe rule staying the same; any change to the PDN offset, pitch, width or spacing needs the macro position recomputed.
+
+Run 2 also gave the first real post-route numbers, with the macro in its old spot:
+
+- **Routing:** DRC clean after 71 minutes of detailed routing.
+- **Timing:** no violations. Worst setup slack is +2.51 ns at the slow corner and worst hold slack +0.10 ns at the fast corner, so hold repair fixed the SRAM inputs.
+- **Slew:** 72 max-slew violations at the slow corner (up to 4.6 ns against a 2.5 ns limit), on long or high-fanout nets.
 
 ### 9.5 Next steps
 
-1. Create the repo from the cmos5l template, copy this project in, and run the GDS action. Then check:
-   - the `pw_export_macro_power_pins` log line;
-   - hold repair at the macro inputs;
-   - post-route setup/hold in all corners;
-   - the Magic DRC report;
-   - LVS.
-2. Ask the TT team (Discord) to confirm the top-level grid's connection to macro power pins on CMOS5L.
-3. If area gets tight: `MBOX_AW=1` (−~23k µm²); 2-deep lane command FIFOs (−~12k µm²).
+1. **GDS run 3** (aligned stripes): power analysis, LVS, Magic DRC report, TT precheck, gate-level test.
+2. **Repair the max-slew violations** (post-global-route design repair, or buffering the worst nets).
+3. **If area or routing gets tight:** `MBOX_AW=1` (−~23k µm²); 2-deep lane command FIFOs (−~12k µm²). The fallback that avoids the macro entirely is a 256×16 latch RAM (~150k µm²).
 
 ---
 

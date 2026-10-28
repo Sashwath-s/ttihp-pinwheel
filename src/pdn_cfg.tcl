@@ -2,22 +2,18 @@
 #
 # Based on LibreLane's default pdn_cfg.tcl and on urish/ttihp-sram-test (SG13G2).
 #
-# Why this differs from the SG13G2 reference: on CMOS5L, Tiny Tapeout limits user
-# blocks to Metal1-Metal4 (RT_MAX_LAYER=Metal4) and owns TopMetal1 for its top-level
-# power grid. The SRAM blocks Metal1-Metal4 over its whole footprint, and its
-# VDD!/VDDARRAY!/VSS! pins are vertical Metal4 straps, so there is no free layer to
-# strap them inside this block (the reference connected Metal4 to TopMetal1 here).
+# On CMOS5L, Tiny Tapeout limits user blocks to Metal1-Metal4 (RT_MAX_LAYER=Metal4) and
+# owns TopMetal1, so the standard-cell stripes are on Metal4 -- the same layer as the
+# SRAM's VDD!/VDDARRAY!/VSS! pins (vertical straps). A macro grid can therefore never
+# create a via (an empty grid is fatal: PDN-0232/0233), and pins exported to the top
+# level leave the macro disconnected inside the block (PSM-0069).
 #
-# Instead every Metal4 power strap of the macro is exported as a VPWR/VGND block pin,
-# exactly like the standard-cell Metal4 stripes. Tiny Tapeout's TopMetal1 grid then
-# connects to the macro straps wherever it crosses them, the same way it connects to
-# the stripes. The global connections (PDN_MACRO_CONNECTIONS) tie the macro supply
-# pins to VPWR/VGND logically for LVS.
-#
-# VERIFY on the first GDS run: (1) the log line from pw_export_macro_power_pins,
-# (2) LVS clean with the macro abstracted, (3) the block LEF lists the macro straps
-# as VPWR/VGND pins. Confirm with the Tiny Tapeout team that their top-level grid
-# connects to every Metal4 power pin of the block, not only to full-height stripes.
+# Instead the macro is placed so that ordinary standard-cell stripes run straight over
+# same-net straps: one VPWR stripe on a full-height VDD! strap, one VGND stripe on a
+# full-height VSS! strap, and one VPWR stripe that enters from above onto a VDDARRAY!
+# strap. PDN_OBSTRUCTIONS in src/config.json cut every other stripe over the macro.
+# The stripes continue into the core and reach the rails above and below the SRAM.
+# The geometry is verified against the macro LEF by scripts/check_tt_config.py.
 
 source $::env(SCRIPTS_DIR)/openroad/common/set_global_connections.tcl
 set_global_connections
@@ -79,56 +75,4 @@ if { $::env(PDN_ENABLE_RAILS) == 1 } {
         -layers "$::env(PDN_RAIL_LAYER) $::env(PDN_VERTICAL_LAYER)"
 }
 
-# No macro grid: on CMOS5L the stripe layer is the macro's pin layer (Metal4), so a
-# macro grid can never create a via, and pdngen rejects the empty grid
-# (PDN-0232/PDN-0233, first GDS run). The stripes are kept off the SRAM by
-# PDN_OBSTRUCTIONS in src/config.json (macro + 10 um halo on Metal4) instead.
-
-# Export the SRAM's Metal4 power straps as VPWR/VGND block pins (see header).
-proc pw_export_macro_power_pins {} {
-    set block [ord::get_db_block]
-    set count 0
-    foreach inst [$block getInsts] {
-        set master [$inst getMaster]
-        if { ![string match "RM_IHPSG13_*" [$master getName]] } { continue }
-        if { [$inst getOrient] != "R0" } {
-            error "pw_export_macro_power_pins: [$inst getName] must be placed R0 (got [$inst getOrient])"
-        }
-        lassign [$inst getLocation] ix iy
-        foreach mterm [$master getMTerms] {
-            set pname [$mterm getName]
-            if { $pname == "VDD!" || $pname == "VDDARRAY!" } {
-                set net_name $::env(VDD_NET)
-            } elseif { $pname == "VSS!" } {
-                set net_name $::env(GND_NET)
-            } else {
-                continue
-            }
-            set net [$block findNet $net_name]
-            set bterm [$block findBTerm $net_name]
-            if { $bterm == "NULL" } {
-                set bterm [odb::dbBTerm_create $net $net_name]
-                $bterm setSigType [$net getSigType]
-                $bterm setIoType INOUT
-                $bterm setSpecial
-            }
-            foreach mpin [$mterm getMPins] {
-                foreach box [$mpin getGeometry] {
-                    set layer [$box getTechLayer]
-                    if { $layer == "NULL" || [$layer getName] != "Metal4" } { continue }
-                    set bpin [odb::dbBPin_create $bterm]
-                    odb::dbBox_create $bpin $layer \
-                        [expr {$ix + [$box xMin]}] [expr {$iy + [$box yMin]}] \
-                        [expr {$ix + [$box xMax]}] [expr {$iy + [$box yMax]}]
-                    $bpin setPlacementStatus FIRM
-                    incr count
-                }
-            }
-        }
-    }
-    puts "\[INFO\] pw_export_macro_power_pins: exported $count macro Metal4 power straps as block pins"
-    if { $count == 0 } {
-        error "pw_export_macro_power_pins: no SRAM power straps found"
-    }
-}
-pw_export_macro_power_pins
+# No macro grid: see the header.

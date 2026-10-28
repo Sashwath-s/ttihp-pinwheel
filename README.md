@@ -107,8 +107,8 @@ python scripts/macro_timing.py
 1. Create the GitHub repo from the [cmos5l template](https://github.com/TinyTapeout/ttihp-verilog-template/tree/cmos5l). Copy in `src/` (including our `config.json`, `pdn_cfg.tcl` and the SRAM black-box stub), `macro/`, `test/`, `docs/`, `info.yaml` and `sw/`. Keep the template's `.github/`.
 2. The top module is `tt_um_sashwath_s_pinwheel` (in `src/tt_um_pinwheel.v`). Set `author` in `info.yaml` to your name or team.
 3. `src/config.json` already integrates the 512×16 SRAM macro. It sets `VERILOG_DEFINES=PW_MEM_IHP_SRAM` and adds `MACROS` with the vendored GDS/LEF/libs/CDL and the placement. `PDN_MACRO_CONNECTIONS` and the custom `pdn_cfg.tcl` handle power. Run `python scripts/check_tt_config.py` after any change.
-4. **First GDS run:** look for the `pw_export_macro_power_pins` log line, hold repair at the macro inputs, post-route timing, the Magic DRC report (`ERROR_ON_MAGIC_DRC` is off) and LVS.
-5. **Ask the TT team to confirm macro power.** User blocks stop at Metal4 on CMOS5L, so the SRAM's Metal4 power straps are exported as block pins for TT's TopMetal1 grid. Ask them to confirm their top level connects to those pins (ARCHITECTURE §9.4).
+4. **SRAM power on CMOS5L:** user blocks stop at Metal4, the same layer as the SRAM's power pins. So the macro is placed where ordinary PDN stripes run straight over its own power straps, with `PDN_OBSTRUCTIONS` cutting every other stripe (ARCHITECTURE §9.4). Don't move the macro or change the PDN offset, pitch, width or spacing without re-running `check_tt_config.py`.
+5. **After each GDS run, check:** power analysis, LVS, the Magic DRC report (`ERROR_ON_MAGIC_DRC` is off), post-route timing and max-slew violations.
 
 ## Writing a protocol
 

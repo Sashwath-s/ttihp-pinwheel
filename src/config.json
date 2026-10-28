@@ -37,13 +37,13 @@
 
   "//": "Macro files are vendored from IHP-Open-PDK 2bbec755 (the commit tt-gds-action installs),",
   "//": "see macro/RM_IHPSG13_1P_512x16_c2_bm_bist/README.md. Pattern from urish/ttihp-sram-test.",
-  "//": "Placed top-left of centre, pins (bottom edge) facing the logic, clear of the TT pins at x<192.",
+  "//": "Placed so PDN stripes land on the macro's own power straps (see the PDN notes below).",
   "//": "Instance name is the flattened Yosys path; the PDN script requires orientation R0.",
   "MACROS": {
     "RM_IHPSG13_1P_512x16_c2_bm_bist": {
       "instances": {
         "u_pw.u_mem.u_sram": {
-          "location": [300.0, 502.74],
+          "location": [307.355, 260.82],
           "orientation": "R0"
         }
       },
@@ -80,13 +80,20 @@
     "u_pw.u_mem.u_sram VPWR VGND VDDARRAY! VSS!"
   ],
 
-  "//": "Custom PDN: user layers stop at Metal4 on CMOS5L, so the SRAM's Metal4 power straps are",
-  "//": "exported as VPWR/VGND block pins for the TT top-level TopMetal1 grid (see pdn_cfg.tcl).",
+  "//": "PDN on CMOS5L: user blocks stop at Metal4 and the SRAM's VDD!/VDDARRAY!/VSS! pins are",
+  "//": "vertical Metal4 straps, so the macro is powered by PDN stripes that run straight over",
+  "//": "same-net straps. Stripe centres are 2.88+10+50k (VPWR) and +2.1+3.05 (VGND); with the",
+  "//": "macro at x=307.355 the stripes at 412.88/418.03 cover its full-height VDD!/VSS! straps and",
+  "//": "the one at 312.88 covers a VDDARRAY! strap from above. PDN_OBSTRUCTIONS cut every other",
+  "//": "stripe over the macro + 10 um halo. Checked by scripts/check_tt_config.py.",
   "PDN_CFG": "dir::pdn_cfg.tcl",
-
-  "//": "Keep the core Metal4 stripes off the SRAM: macro (300, 502.74)-(536.8, 694.08) + 10 um halo.",
-  "//": "Applied only while the PDN is generated (LibreLane removes it afterwards).",
-  "PDN_OBSTRUCTIONS": ["Metal4 290.00 492.74 546.80 704.08"],
+  "FP_PDN_VSPACING": 3.05,
+  "PDN_OBSTRUCTIONS": [
+    "Metal4 297.355 250.82 310.830 462.16",
+    "Metal4 310.830 250.82 314.930 320.82",
+    "Metal4 314.930 250.82 410.830 462.16",
+    "Metal4 420.080 250.82 554.155 462.16"
+  ],
 
   "//": "SRAM GDS has no PR boundary layer; read full GDS instead of blackbox",
   "MAGIC_MACRO_STD_CELL_SOURCE": "PDK",
